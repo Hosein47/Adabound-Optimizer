@@ -18,8 +18,8 @@ class adabound(optimizers.Optimizer):
                  epsilon=None,
                  weight_decay=0.0,
                  amsgrad=False,
-                 name='AdaBound', **kwargs):
-        super(AdaBound, self).__init__(name, **kwargs)
+                 name='adabound', **kwargs):
+        super(adabound, self).__init__(name, **kwargs)
 
         self._set_hyper('learning_rate', kwargs.get('learning_rate', learning_rate))
         self._set_hyper('final_learning_rate', kwargs.get('final_learning_rate', final_learning_rate))
@@ -101,7 +101,7 @@ class adabound(optimizers.Optimizer):
         raise NotImplementedError("Sparse data is not supported yet")
 
     def get_config(self):
-        config = super(AdaBound, self).get_config()
+        config = super(adabound, self).get_config()
         config.update({
             'learning_rate': self._serialize_hyperparameter('learning_rate'),
             'final_learning_rate': self._serialize_hyperparameter('final_learning_rate'),
