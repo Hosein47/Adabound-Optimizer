@@ -1,0 +1,130 @@
+import os
+os.environ['TF_KERAS']='1'
+
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.python.keras import utils
+from tensorflow.python.keras import activations
+from tensorflow.python.keras import applications
+from tensorflow.keras import backend as K
+from tensorflow.python.keras import datasets
+from tensorflow.python.keras import engine
+from tensorflow.python.keras import layers
+from tensorflow.python.keras import preprocessing
+from tensorflow.python.keras import wrappers
+from tensorflow.python.keras import callbacks
+from tensorflow.python.keras import constraints
+from tensorflow.python.keras import initializers
+from tensorflow.python.keras import metrics
+from tensorflow.python.keras import models
+from tensorflow.python.keras import losses
+from tensorflow.keras import optimizers
+from tensorflow.python.keras import regularizers
+
+class adabound(optimizers.Optimizer):
+    #AdaBound optimizer.
+    def __init__(self,
+                 learning_rate=0.001,
+                 final_learning_rate=0.1,
+                 beta_1=0.9,
+                 beta_2=0.999,
+                 gamma=1e-3,
+                 epsilon=None,
+                 weight_decay=0.0,
+                 amsgrad=False,
+                 name='AdaBound', **kwargs):
+        super(AdaBound, self).__init__(name, **kwargs)
+
+        self._set_hyper('learning_rate', kwargs.get('learning_rate', learning_rate))
+        self._set_hyper('final_learning_rate', kwargs.get('final_learning_rate', final_learning_rate))
+        self._set_hyper('beta_1', beta_1)
+        self._set_hyper('beta_2', beta_2)
+        self._set_hyper('decay', self._initial_decay)
+        self._set_hyper('gamma', gamma)
+        self.epsilon = epsilon or K.epsilon()
+        self.amsgrad = amsgrad
+        self.weight_decay = weight_decay
+        self.base_lr = learning_rate
+
+    def _create_slots(self, var_list):
+        for var in var_list:
+            self.add_slot(var, 'm')
+            self.add_slot(var, 'v')
+            if self.amsgrad:
+                self.add_slot(var, 'vhat')
+
+    def _resource_apply_dense(self, grad, var):
+        var_dtype = var.dtype.base_dtype
+        lr_t = self._decayed_lr(var_dtype)
+
+        m = self.get_slot(var, 'm')
+        v = self.get_slot(var, 'v')
+        vhat = self.get_slot(var, 'vhat')
+
+        beta_1_t = self._get_hyper('beta_1', var_dtype)
+        beta_2_t = self._get_hyper('beta_2', var_dtype)
+
+        gamma = self._get_hyper('gamma')
+        final_lr = self._get_hyper('final_learning_rate')
+
+        epsilon_t = tf.convert_to_tensor(self.epsilon, var_dtype)
+        base_lr_t = tf.convert_to_tensor(self.base_lr)
+        t = tf.cast(self.iterations + 1, var_dtype)
+
+        
+        step_size = lr_t * (tf.math.sqrt(1. - tf.math.pow(beta_2_t, t)) /
+                          (1. - tf.math.pow(beta_1_t, t)))
+
+        final_lr = final_lr * lr_t / base_lr_t
+        lower_bound = final_lr * (1. - 1. / (gamma * t + 1.))
+        upper_bound = final_lr * (1. + 1. / (gamma * t))
+
+
+        if self.weight_decay != 0.:
+            grad += self.weight_decay * var
+
+
+        m_t = (beta_1_t * m) + (1. - beta_1_t) * grad
+        v_t = (beta_2_t * v) + (1. - beta_2_t) * tf.math.square(grad)
+
+        if self.amsgrad:
+            vhat_t = tf.math.maximum(vhat, v_t) #K.maximum(vhat, v_t)
+            step_size_p = step_size * tf.ones_like(tf.math.sqrt(vhat_t) + epsilon_t)
+            step_size_p_bound = step_size_p / (tf.math.sqrt(vhat_t) + epsilon_t)
+            bounded_lr_t = m_t * tf.math.minimum(tf.math.maximum(step_size_p_bound,
+                                             lower_bound), upper_bound)
+        else:
+            vhat_t = vhat
+            step_size_p = step_size * tf.ones_like(tf.math.sqrt(v_t) + self.epsilon)
+            step_size_p_bound = step_size_p / (tf.math.sqrt(v_t) + self.epsilon)
+            bounded_lr_t = m_t * tf.math.minimum(tf.math.maximum(step_size_p_bound,
+                                             lower_bound), upper_bound)
+
+
+
+        m_t = tf.compat.v1.assign(m, m_t)
+        vhat_t = tf.compat.v1.assign(vhat, vhat_t)
+
+        with tf.control_dependencies([m_t, v_t, vhat_t]):
+            p_t = var - bounded_lr_t
+            param_update = tf.compat.v1.assign(var, p_t)
+
+            return tf.group(*[param_update, m_t, v_t, vhat_t])
+
+    def _resource_apply_sparse(self, grad, handle, indices):
+        raise NotImplementedError("Sparse data is not supported yet")
+
+    def get_config(self):
+        config = super(AdaBound, self).get_config()
+        config.update({
+            'learning_rate': self._serialize_hyperparameter('learning_rate'),
+            'final_learning_rate': self._serialize_hyperparameter('final_learning_rate'),
+            'decay': self._serialize_hyperparameter('decay'),
+            'beta_1': self._serialize_hyperparameter('beta_1'),
+            'beta_2': self._serialize_hyperparameter('beta_2'),
+            'gamma': self._serialize_hyperparameter('gamma'),
+            'epsilon': self.epsilon,
+            'weight_decay': self.weight_decay,
+            'amsgrad': self.amsgrad,
+        })
+        return config
